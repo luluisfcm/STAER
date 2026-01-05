@@ -1,0 +1,176 @@
+<html lang="pt">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Radar STAER</title>
+
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;700&display=swap" rel="stylesheet">
+
+    <style>
+        body { margin: 0; padding: 0; font-family: 'Roboto', sans-serif; overflow: hidden; }
+        #map { height: 100vh; width: 100%; }
+
+        /* Painel de Controlo */
+        .painel {
+            position: absolute;
+            top: 20px; right: 20px;
+            width: 280px;
+            background: rgba(255, 255, 255, 0.95);
+            padding: 20px;
+            border-radius: 12px;
+                        box-shadow: 0 8px 32px rgba(0,0,0,0.2);
+            z-index: 1000;
+            backdrop-filter: blur(5px);
+        }
+
+        .painel h2 { margin-top: 0; color: #2c3e50; font-size: 20px; text-align: center; }
+
+        .status-box {
+            background: #e3f2fd;
+            color: #1565c0;
+            padding: 10px;
+            border-radius: 8px;
+            text-align: center;
+            font-weight: bold;
+            margin-bottom: 20px;
+        }
+
+        /* Estilo dos Controlos */
+        .control-group { margin-bottom: 15px; }
+        .control-group label { display: block; font-size: 13px; color: #555; margin-bottom: 5px; }
+
+        input[type="range"] { width: 100%; cursor: pointer; }
+        input[type="text"] {
+            width: 100%; padding: 8px;
+            border: 1px solid #ddd; border-radius: 6px;
+            box-sizing: border-box;
+        }
+
+        .valor-filtro { float: right; font-weight: bold; color: #333; }
+
+        .btn-limpar {
+            width: 100%;
+            padding: 10px;
+            background-color: #ff5252;
+            color: white;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-weight: bold;
+            transition: 0.3s;
+        }
+        .btn-limpar:hover { background-color: #d32f2f; }
+    </style>
+</head>
+<body>
+
+    <div class="painel">
+        <h2>✈️ Radar STAER</h2>
+
+        <div class="status-box">
+                        <span id="contagem">0</span> aviões visíveis
+        </div>
+
+        <div class="control-group">
+            <label>🔍 Buscar Voo:</label>
+            <input type="text" id="filtroTexto" placeholder="Ex: TAP, RYR..." onkeyup="atualizarMapa()">
+        </div>
+
+        <div class="control-group">
+            <label>🏔️ Altitude Mínima: <span id="lblAlt" class="valor-filtro">0 ft</span></label>
+            <input type="range" id="filtroAlt" min="0" max="40000" step="1000" value="0" oninput="atualizarMapa()">
+        </div>
+
+        <div class="control-group">
+            <label>💨 Velocidade Mínima: <span id="lblVel" class="valor-filtro">0 kts</span></label>
+            <input type="range" id="filtroVel" min="0" max="500" step="10" value="0" oninput="atualizarMapa()">
+        </div>
+
+        <button class="btn-limpar" onclick="resetFiltros()">Limpar Filtros</button>
+            </div>
+
+    <div id="map"></div>
+
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script>
+        // Inicializar Mapa
+        var map = L.map('map').setView([41.5, -8.0], 7);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '© OpenStreetMap contributors'
+        }).addTo(map);
+
+        var marcadores = {};
+
+        // Função para atualizar os labels dos sliders
+        function atualizarLabels(alt, vel) {
+            document.getElementById('lblAlt').innerText = alt + " ft";
+            document.getElementById('lblVel').innerText = vel + " kts";
+                    }
+
+        function resetFiltros() {
+            document.getElementById('filtroTexto').value = "";
+            document.getElementById('filtroAlt').value = 0;
+            document.getElementById('filtroVel').value = 0;
+            atualizarMapa();
+        }
+
+        function atualizarMapa() {
+            // Ler valores dos inputs
+            var txt = document.getElementById('filtroTexto').value;
+            var alt = document.getElementById('filtroAlt').value;
+            var vel = document.getElementById('filtroVel').value;
+            
+            atualizarLabels(alt, vel);
+
+            // Construir URL com parâmetros
+            var url = `/api/avioes?busca=${txt}&min_alt=${alt}&min_vel=${vel}`;
+
+            fetch(url)
+                .then(response => response.json())
+                .then(data => {
+                    document.getElementById('contagem').innerText = data.length;
+                    var idsAtuais = [];
+
+                    data.forEach(aviao => {
+                        idsAtuais.push(aviao.hex);
+
+                        // Define ícone (se estiver alto é avião, se for baixo/lento pode ser outra coisa)
+                        var icone = aviao.alt > 10000 ? "✈️" : "🛩️";
+
+                        var popup = `
+                            <div style="text-align:center; font-size:14px;">
+                                                                <b>Voo ${aviao.flight}</b><hr style="margin:5px 0">
+                                📏 Alt: <b>${aviao.alt}</b> ft<br>
+                                🚀 Vel: <b>${aviao.speed}</b> kts<br>
+                                🆔 Hex: ${aviao.hex}
+                            </div>
+                        `;
+
+                        if (marcadores[aviao.hex]) {
+                            marcadores[aviao.hex].setLatLng([aviao.lat, aviao.lon]);
+                            marcadores[aviao.hex].setPopupContent(popup);
+                        } else {
+                            var marker = L.marker([aviao.lat, aviao.lon]).addTo(map);
+                            marker.bindPopup(popup);
+                            marcadores[aviao.hex] = marker;
+                        }
+                    });
+
+                    // Limpeza de marcadores antigos
+                    for (var id in marcadores) {
+                        if (!idsAtuais.includes(id)) {
+                            map.removeLayer(marcadores[id]);
+                            delete marcadores[id];
+                        }
+                    }
+                })
+                .catch(console.error);
+        }
+
+        // Loop de atualização (2 segundos)
+        setInterval(atualizarMapa, 2000);
+        atualizarMapa();
+    </script>
+</body>
+</html>
